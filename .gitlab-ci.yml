@@ -1,0 +1,65 @@
+
+
+variables:
+  IMAGE_NAME: expensenest
+
+services:
+  - name: docker:dind
+
+cache:
+  paths:
+    - .m2/repository
+
+stages:
+  - build
+  - test
+  - package
+  - deploy
+
+build_job:
+  image: jelastic/maven:3.8.6-openjdk-20.ea-b24
+  stage: build
+  artifacts:
+    paths:
+      - target
+  script:
+    - mvn clean install
+    - mvn compile
+
+test_job:
+  image: jelastic/maven:3.8.6-openjdk-20.ea-b24
+  stage: test
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/tests/TEST_*.xml
+  script:
+    - mvn test
+
+package_job:
+  image: jelastic/maven:3.8.6-openjdk-20.ea-b24
+  stage: package
+  artifacts:
+    paths:
+      - target
+  script:
+    - mvn package
+
+deploy_job:
+  image: jelastic/maven:3.8.6-openjdk-20.ea-b24
+  stage: deploy
+  artifacts:
+    paths:
+      - target
+  before_script:
+    - 'command -v ssh-agent >/dev/null || ( apk add --update openssh )'
+    - eval $(ssh-agent -s)
+    - echo "$PEM_FILE" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $EC2_HOST >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - scp -o StrictHostKeyChecking=no target/ExpenseNest-0.0.1-SNAPSHOT.jar $USER@$EC2_HOST:~
+    - ssh -o StrictHostKeyChecking=no $USER@$EC2_HOST "nohup java ExpenseNest-*-SNAPSHOT.jar > ExpenseNest-*-SNAPSHOT.log &"
